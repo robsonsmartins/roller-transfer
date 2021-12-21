@@ -1,0 +1,3 @@
+*.jal linguist-language=Pascal linguist-detectable
+*.sch linguist-language=Eagle linguist-detectable
+*.brd linguist-language=Eagle linguist-detectable
