@@ -1,0 +1,82 @@
+-- ----------------------------------------------------------------------------
+-- Title: Laminadora PCB
+-- http://www.robsonmartins.com/eletr/laminadora/
+--
+-- Author: Robson Martins  
+-- http://www.robsonmartins.com
+--
+-- ----------------------------------------------------------------------------
+-- configure ADC
+-- measure using high resolution
+const bit ADC_HIGH_RESOLUTION = high
+-- 1 analog channel...
+const byte ADC_NCHANNEL = 1
+-- no external voltage reference
+const byte ADC_NVREF = ADC_NO_EXT_VREF
+-- include the library
+include adc
+-- run the initialization step
+adc_init()
+
+-- ----------------------------------------------------------------------------
+-- port/pin map
+if (defined(thermometer_adc_channel) == false) then
+  const byte thermometer_adc_channel = 0
+end if
+
+-- ----------------------------------------------------------------------------
+-- variables
+-- lookup table for temperature
+-- index is (temp - 20) / 2
+-- content is adc value
+const word temp_table[101] =
+  { 40, 44, 48, 52, 56, 61, 66, 71, 76, 82, 87, 93,100,106,113,120,128,135,143,
+   151,159,168,177,185,194,204,213,223,232,242,252,262,272,282,292,303,313,324,
+   334,344,355,365,376,386,396,406,417,427,437,447,457,466,476,485,495,504,513,
+   523,531,540,549,558,566,574,582,590,598,606,614,621,628,635,642,649,656,663,
+   669,676,682,688,694,700,705,711,717,722,727,732,737,742,747,752,756,761,765,
+   770,774,778,782,786,790 }
+
+-- current temperature measure
+var byte temp_measure_current = 20 
+-- ----------------------------------------------------------------------------
+-- procedures and functions
+-- ----------------------------------------------------------------------------
+
+-- Gets the actual temperature in celsius
+function thermoGetTempByte() return byte is
+  var byte temp_table_idx = 0
+  var word temp_adc_raw = 0
+  var byte temp_parcial = 0
+
+  -- get ADC result, high resolution
+  temp_adc_raw = adc_read(thermometer_adc_channel)
+  
+  if (temp_adc_raw == 0x3FF) then
+    temp_parcial = 0
+  elsif (temp_adc_raw == 0) then
+    temp_parcial = 255
+  elsif (temp_adc_raw > temp_table[100]) then
+    temp_parcial = 221
+  elsif (temp_adc_raw < temp_table[0]) then
+    temp_parcial = 19
+  else
+    for 101 using temp_table_idx loop
+      if (temp_adc_raw == temp_table[temp_table_idx]) then
+        temp_parcial = (temp_table_idx * 2 + 20)
+        exit loop
+      elsif (temp_adc_raw < temp_table[temp_table_idx]) then
+        temp_parcial = (temp_table_idx * 2 + 19)
+        exit loop
+      end if
+    end loop
+  end if
+
+  if (temp_parcial != 0) then
+    temp_measure_current = temp_parcial
+  end if
+  
+  return temp_measure_current
+  
+end function
+

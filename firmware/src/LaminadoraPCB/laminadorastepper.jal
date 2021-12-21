@@ -1,0 +1,67 @@
+-- ----------------------------------------------------------------------------
+-- Title: Laminadora PCB
+-- http://www.robsonmartins.com/eletr/laminadora/
+--
+-- Author: Robson Martins  
+-- http://www.robsonmartins.com
+--
+-- ----------------------------------------------------------------------------
+-- port/pin map
+if (defined(stepper_x0) == false) then
+  var bit stepper_x0 is pin_A2
+end if
+if (defined(stepper_x1) == false) then
+  var bit stepper_x1 is pin_A3
+end if
+if (defined(stepper_y0) == false) then
+  var bit stepper_y0 is pin_A1
+end if
+if (defined(stepper_y1) == false) then
+  var bit stepper_y1 is pin_A5
+end if
+
+-- ----------------------------------------------------------------------------
+-- variables
+-- low torque step masks
+const byte stepper_step[4] =
+  {0b_0000_0001, 0b_0000_0100, 0b_0000_0010, 0b_0000_1000}
+-- current index of step in mask
+var byte stepper_step_idx = 0
+
+-- ----------------------------------------------------------------------------
+-- procedures and functions
+-- ----------------------------------------------------------------------------
+
+-- Does a forward step
+procedure stepperNext() is
+  stepper_x0 = (stepper_step[stepper_step_idx] & 0x08) >> 3
+  stepper_x1 = (stepper_step[stepper_step_idx] & 0x04) >> 2
+  stepper_y0 = (stepper_step[stepper_step_idx] & 0x02) >> 1
+  stepper_y1 = (stepper_step[stepper_step_idx] & 0x01)
+  stepper_step_idx = stepper_step_idx + 1
+  if (stepper_step_idx > 3) then
+    stepper_step_idx = 0
+  end if
+end procedure
+
+-- Does a backward step
+procedure stepperPrevious() is
+  stepper_x0 = (stepper_step[stepper_step_idx] & 0x08) >> 3
+  stepper_x1 = (stepper_step[stepper_step_idx] & 0x04) >> 2
+  stepper_y0 = (stepper_step[stepper_step_idx] & 0x02) >> 1
+  stepper_y1 = (stepper_step[stepper_step_idx] & 0x01)
+  if (stepper_step_idx > 0) then
+    stepper_step_idx = stepper_step_idx - 1
+  else
+    stepper_step_idx = 3
+  end if
+end procedure
+
+-- Stopps the stepper motor
+procedure stepperOff() is
+  stepper_x0 = 0
+  stepper_x1 = 0
+  stepper_y0 = 0
+  stepper_y1 = 0
+end procedure
+

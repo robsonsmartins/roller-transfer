@@ -1,0 +1,80 @@
+-- ----------------------------------------------------------------------------
+-- Title: Laminadora PCB
+-- http://www.robsonmartins.com/eletr/laminadora/
+--
+-- Author: Robson Martins  
+-- http://www.robsonmartins.com
+--
+-- ----------------------------------------------------------------------------
+-- constant for the segments      gfe dcba
+const byte seven_segment_a  = 0b_0000_0001
+const byte seven_segment_b  = 0b_0000_0010
+const byte seven_segment_c  = 0b_0000_0100
+const byte seven_segment_d  = 0b_0000_1000
+const byte seven_segment_e  = 0b_0001_0000
+const byte seven_segment_f  = 0b_0010_0000
+const byte seven_segment_g  = 0b_0100_0000
+const byte seven_segment_dp = 0b_1000_0000
+
+include seven_segment              -- seven segment display routines
+
+-- ----------------------------------------------------------------------------
+-- port/pin map
+if (defined(display_port) == false) then
+  var byte display_port is PORTC
+end if
+if (defined(display_k0) == false) then
+  var bit display_k0 is pin_B0
+end if
+if (defined(display_k1) == false) then
+  var bit display_k1 is pin_B1
+end if
+if (defined(display_k2) == false) then
+  var bit display_k2 is pin_B2
+end if
+
+-- ----------------------------------------------------------------------------
+-- variables
+var byte display_map[3] = {0,0,0}   -- display digits map [2 1 0]
+var byte display_digit_idx = 0      -- current index of display digit
+
+-- ----------------------------------------------------------------------------
+-- procedures and functions
+-- ----------------------------------------------------------------------------
+
+-- Refresh display (one digit, and increments index to the next)
+procedure refreshDisplay() is
+  var byte display_digit_value = 0 
+  display_digit_value = display_map[display_digit_idx]    
+  if (display_digit_value != 255) then
+    display_port = seven_from_digit(display_digit_value)
+  else
+    display_port = seven_segment_g
+  end if
+  case display_digit_idx of
+    0: block display_k2 = 0 display_k1 = 0 display_k0 = 1 end block  
+	1: block display_k2 = 0 display_k1 = 1 display_k0 = 0 end block  
+	2: block display_k2 = 1 display_k1 = 0 display_k0 = 0 end block  
+  end case
+  display_digit_idx = display_digit_idx + 1
+  if (display_digit_idx > 2) then
+    display_digit_idx = 0
+  end if
+end procedure
+
+-- Show a byte in display
+-- @param[in] value Value to show
+procedure setDisplayByte(byte in value) is
+  display_map[2] = value / 100
+  value = value - display_map[2] * 100
+  display_map[1] = value / 10
+  value = value - display_map[1] * 10
+  display_map[0] = value
+end procedure
+
+-- Show a dash in display
+procedure setDisplayDash() is
+  display_map[2] = 255
+  display_map[1] = 255
+  display_map[0] = 255
+end procedure

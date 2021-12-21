@@ -1,0 +1,203 @@
+-- ----------------------------------------------------------------------------
+-- Title: Laminadora PCB
+-- http://www.robsonmartins.com/eletr/laminadora/
+--
+-- Author: Robson Martins  
+-- http://www.robsonmartins.com
+--
+-- JALv2 Compiler: 2.4o
+--
+-- Description: Firmware da Laminadora PCB
+--
+-- Sources:
+-- 	 laminadorapcb.jal         : main program
+--   laminadoradisplay.jal     : display routines
+--   laminadorastepper.jal     : stepper motor routines
+--   laminadorathermometer.jal : thermometer routines
+--
+-- Notes:
+--  - File creation date/time: Sun Sep 18 14:54:22 BRT 2011.
+-- ----------------------------------------------------------------------------
+-- don't remove this line! (needed for jal eclipse plugin)
+--;@main
+-- ----------------------------------------------------------------------------
+include 16f870                    -- target PICmicro
+-- ----------------------------------------------------------------------------
+-- Resonator or crystal connected to pins OSC1 and OSC2.
+pragma target clock 20_000_000     -- oscillator frequency
+-- ----------------------------------------------------------------------------
+-- configuration memory settings (fuses)
+pragma target OSC  HS              -- HS crystal or resonator
+pragma target WDT  disabled        -- no watchdog
+pragma target LVP  disabled        -- no Low Voltage Programming
+-- ----------------------------------------------------------------------------
+
+enable_digital_io()                -- make all pins digital I/O
+include delay                      -- delay routines 
+
+-- ----------------------------------------------------------------------------
+-- port/pin map
+PORTA_direction = 0b_0001_0001
+PORTB_direction = 0b_1101_1000
+PORTC_direction = ALL_OUTPUT
+-- display port (7 seg)
+var byte display_port is PORTC
+-- stepper controller pins
+var bit stepper_x0    is pin_A2
+var bit stepper_x1    is pin_A3
+var bit stepper_y0    is pin_A1
+var bit stepper_y1    is pin_A5
+-- display cathode pins (for each digit [2,1,0])
+var bit display_k0    is pin_B0
+var bit display_k1    is pin_B1
+var bit display_k2    is pin_B2
+-- start/stop switch pin
+var bit start_stop_sw is pin_B4
+-- fuser control pin
+var bit fuser_control is pin_B5
+-- thermometer analog channel
+const byte thermometer_adc_channel = 0
+                
+-- ----------------------------------------------------------------------------
+-- setup the timer0_isr_interval library
+const word timer0_isr_rate = 1000  -- 1 kHz isr rate
+const DELAY_SLOTS = 5              -- support 5 delays at the same time
+include timer0_isr_interval        -- timer0 isr routines
+
+-- ----------------------------------------------------------------------------
+
+include laminadoradisplay          -- Display routines
+include laminadorastepper          -- Stepper Motor routines
+include laminadorathermometer      -- Thermometer routines
+
+-- ----------------------------------------------------------------------------
+-- constants
+
+-- thermostat target temperature (celsius)
+const byte THERMOSTAT_TEMPERATURE = 180 -- 195 (R4=5K6,180)
+-- thermostat histeresys (celsius)
+const byte THERMOSTAT_HISTERESYS  = 2
+-- auto power-off temperature (celsius)
+const byte AUTO_POWEROFF_TEMPERATURE = 50
+-- stepper motor frequency (hertz) - in started state
+const word STEPPER_STATE1_FREQ = 20
+-- stepper motor frequency (hertz) - in stopping state
+const word STEPPER_STATE2_FREQ = 200
+
+-- ----------------------------------------------------------------------------
+-- variables
+
+-- thermostat control
+var bit thermostat = off
+-- laminadora status
+-- 0 = stopped; 1 = started; 2 = stopping
+var byte laminadora_status = 0
+-- fuser temperature (actual)
+var byte temperature = 0
+-- stepper motor frequency (hertz) - actual
+var word stepper_current = STEPPER_STATE1_FREQ
+
+-- number of measures for antialias filter
+const byte TEMPERATURE_NMEASURES_AA = 16
+-- temperature measures (for antialias filter)
+var byte temperature_measures[TEMPERATURE_NMEASURES_AA]
+-- index of temperature measures
+var byte temparature_measure_idx = 0
+
+-- ----------------------------------------------------------------------------
+-- main program
+
+timer0_isr_init()             -- init timer0 isr
+stepperOff()                  -- stop stepper motor
+setDisplayDash()              -- show a dash in display
+
+forever loop
+
+  -- ----------------------------------------------------------------------
+  -- refresh display slot
+  if (check_delay(0)) then
+    set_delay(0, 5) -- 5 ticks on delay-slot 0 (200Hz)
+    -- refresh display
+    refreshDisplay()
+  end if
+  
+  -- ----------------------------------------------------------------------
+  -- thermometer display slot
+  if (check_delay(1)) then
+    set_delay(1, 1000) -- 1000 ticks on delay-slot 1 (1Hz)
+    -- shows temperature in display
+    if (laminadora_status != 0) then
+      var byte temp_idx = 0
+      var word temp_result = 0
+      for TEMPERATURE_NMEASURES_AA using temp_idx loop
+        temp_result = temp_result + temperature_measures[temp_idx] 
+      end loop
+      setDisplayByte(byte(temp_result / TEMPERATURE_NMEASURES_AA))
+    end if
+  end if
+
+  -- ----------------------------------------------------------------------
+  -- thermostat slot
+  if (check_delay(2)) then
+    set_delay(2, 10) -- 10 ticks on delay-slot 2 (100Hz)
+    -- gets the temperature
+    temperature = thermoGetTempByte()
+    -- thermostat function
+    if (thermostat & laminadora_status == 1) then
+      if (temperature > THERMOSTAT_TEMPERATURE) then
+        -- power off fuser
+        fuser_control = off
+      elsif (temperature <
+             (THERMOSTAT_TEMPERATURE - THERMOSTAT_HISTERESYS)) then
+        -- power on fuser
+        fuser_control = on
+      end if
+    end if
+    -- stores the measure    
+    temperature_measures[temparature_measure_idx] = temperature
+    temparature_measure_idx = temparature_measure_idx + 1
+    if (temparature_measure_idx > TEMPERATURE_NMEASURES_AA - 1) then
+      temparature_measure_idx = 0
+    end if
+  end if
+
+  -- ----------------------------------------------------------------------
+  -- stepper motor advance slot
+  if (check_delay(3)) then
+    set_delay(3, 1000 / stepper_current) -- delay-slot 3
+    -- next motor step
+    if (laminadora_status != 0) then
+      stepperNext()
+    end if
+  end if
+
+  -- ----------------------------------------------------------------------
+  -- start/stop switch status/check slot
+  if (check_delay(4)) then
+    set_delay(4, 500) -- 500 ticks on delay-slot 4 (2Hz)
+    -- check switch
+    if (!start_stop_sw) then
+      setDisplayDash()
+      case laminadora_status of
+        0, 2: block
+                thermostat        = on
+                laminadora_status = 1
+                stepper_current   = STEPPER_STATE1_FREQ
+              end block
+        1   : block
+                fuser_control     = off
+                thermostat        = off
+                laminadora_status = 2
+                stepper_current   = STEPPER_STATE2_FREQ
+              end block
+      end case
+    end if
+    -- processes the stopping state
+    if (laminadora_status == 2 & temperature < AUTO_POWEROFF_TEMPERATURE) then
+      -- stop
+      stepperOff()
+      setDisplayDash()
+      laminadora_status = 0
+    end if
+  end if
+end loop
